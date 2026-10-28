@@ -1,147 +1,366 @@
-import 'package:flutter/material.dart';
 
-void main() => runApp(const MyApp());
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+// ======================================
+// 1. USER MODEL
+// ======================================
+
+class UserModel {
+  final String id;
+  final String firstName;
+  final String lastName;
+  final String email;
+  final String avatar;
+
+  const UserModel({
+    required this.id,
+    required this.firstName,
+    required this.lastName,
+    required this.email,
+    this.avatar = '',
+  });
+
+  factory UserModel.fromJson(Map<String, dynamic> json) {
+    return UserModel(
+      id: json['id'].toString(),
+      firstName: (json['first_name'] ?? '').toString(),
+      lastName: (json['last_name'] ?? '').toString(),
+      email: (json['email'] ?? '').toString(),
+      avatar: (json['avatar'] ?? '').toString(),
+    );
+  }
+
+  String get fullName => '$firstName $lastName'.trim();
+
+  String get initials {
+    final a = firstName.isNotEmpty ? firstName[0] : '';
+    final b = lastName.isNotEmpty ? lastName[0] : '';
+    return '$a$b'.toUpperCase();
+  }
+}
+
+// ======================================
+// 2. USER SERVICE - REST API REQRES
+// ======================================
+
+class ApiError implements Exception {
+  final String message;
+
+  const ApiError(this.message);
+
+  @override
+  String toString() => message;
+}
+
+class UserService {
+  static const String baseUrl = 'https://reqres.in/api/users';
+
+  String apiKey = const String.fromEnvironment(
+    'REQRES_API_KEY',
+    defaultValue: 'reqres-free-v1',
+  );
+
+  Map<String, String> get headers => {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'x-api-key': apiKey,
+    'X-Reqres-Env': 'prod',
+  };
+
+  Future<http.Response> request(
+      Future<http.Response> Function() call,
+      List<int> acceptedStatus,
+      ) async {
+    try {
+      final response = await call().timeout(
+        const Duration(seconds: 15),
+      );
+
+      if (!acceptedStatus.contains(response.statusCode)) {
+        if (response.statusCode == 401 ||
+            response.statusCode == 403) {
+          throw const ApiError(
+            'API Key ditolak. Periksa pengaturan API Key.',
+          );
+        }
+
+        String detail = '';
+
+        try {
+          final data = jsonDecode(response.body);
+          if (data is Map) {
+            detail = (data['error'] ?? data['message'] ?? '')
+                .toString();
+          }
+        } catch (_) {}
+
+        throw ApiError(
+          'HTTP ${response.statusCode}'
+              '${detail.isNotEmpty ? ': $detail' : ''}',
+        );
+      }
+
+      return response;
+    } on TimeoutException {
+      throw const ApiError(
+        'Koneksi terlalu lama. Silakan coba lagi.',
+      );
+    } on http.ClientException {
+      throw const ApiError(
+        'Gagal terhubung ke server. Periksa internet atau CORS browser.',
+      );
+    }
+  }
+
+  // READ - GET
+  Future<List<UserModel>> getUsers() async {
+    final response = await request(
+          () => http.get(
+        Uri.parse('$baseUrl?page=1&per_page=12'),
+        headers: headers,
+      ),
+      [200],
+    );
+
+    try {
+      final body = jsonDecode(response.body);
+      final List data = body['data'];
+
+      return data
+          .map((item) => UserModel.fromJson(item))
+          .toList();
+    } catch (_) {
+      throw const ApiError(
+        'Format data pengguna tidak sesuai.',
+      );
+    }
+  }
+
+  // CREATE - POST
+  Future<UserModel> createUser(
+      String firstName,
+      String lastName,
+      String email,
+      ) async {
+    final response = await request(
+          () => http.post(
+        Uri.parse(baseUrl),
+        headers: headers,
+        body: jsonEncode({
+          'name': '$firstName $lastName',
+          'job': 'User',
+          'first_name': firstName,
+          'last_name': lastName,
+          'email': email,
+        }),
+      ),
+      [200, 201],
+    );
+
+    final data = jsonDecode(response.body);
+    final id = data['id']?.toString() ??
+        DateTime.now().millisecondsSinceEpoch.toString();
+
+    return UserModel(
+      id: id,
+      firstName: firstName,
+      lastName: lastName,
+      email: email,
+    );
+  }
+
+  // UPDATE - PUT
+  Future<UserModel> updateUser(UserModel user) async {
+    await request(
+          () => http.put(
+        Uri.parse('$baseUrl/${user.id}'),
+        headers: headers,
+        body: jsonEncode({
+          'name': user.fullName,
+          'job': 'User',
+          'first_name': user.firstName,
+          'last_name': user.lastName,
+          'email': user.email,
+        }),
+      ),
+      [200, 201],
+    );
+
+    return user;
+  }
+
+  // DELETE
+  Future<void> deleteUser(String id) async {
+    await request(
+          () => http.delete(
+        Uri.parse('$baseUrl/$id'),
+        headers: headers,
+      ),
+      [200, 204],
+    );
+  }
+}
+
+// ======================================
+// 3. MAIN APPLICATION
+// ======================================
+
+void main() {
+  runApp(const MyApp());
+}
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
+    const primary = Color(0xFF527967);
+
     return MaterialApp(
-      title: 'Form Registrasi',
       debugShowCheckedModeBanner: false,
+      title: 'Ruang Pengguna',
       theme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
         useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: primary,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF7F9F6),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFF7F9F6),
+          foregroundColor: Color(0xFF263B30),
+          centerTitle: false,
+          elevation: 0,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 16,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(
+              color: Color(0xFFDDE5DE),
+            ),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(
+              color: Color(0xFFDDE5DE),
+            ),
+          ),
+        ),
       ),
-      home: const RegistrationPage(),
+      home: const UserPage(),
     );
   }
 }
 
-class RegistrationPage extends StatefulWidget {
-  const RegistrationPage({super.key});
+// ======================================
+// 4. HALAMAN UTAMA
+// ======================================
+
+class UserPage extends StatefulWidget {
+  const UserPage({super.key});
 
   @override
-  State<RegistrationPage> createState() => _RegistrationPageState();
+  State<UserPage> createState() => _UserPageState();
 }
 
-class _RegistrationPageState extends State<RegistrationPage> {
-  // Kunci form untuk validasi
-  final _formKey = GlobalKey<FormState>();
+class _UserPageState extends State<UserPage> {
+  final UserService service = UserService();
 
-  // Controller tiap field
-  final _namaController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  late Future<List<UserModel>> futureUsers;
 
-  // FocusNode agar tombol "next" berpindah Nama -> Email -> Password
-  final _namaFocus = FocusNode();
-  final _emailFocus = FocusNode();
-  final _passwordFocus = FocusNode();
-
-  // State input non-teks
-  String? _jenisKelamin;
-  String? _programStudi;
-  bool _setuju = false;
-  bool _obscurePassword = true;
-
-  // Menandai bahwa tombol Daftar sudah ditekan (untuk menampilkan error Radio/Dropdown)
-  bool _sudahSubmit = false;
-
-  final List<String> _daftarProdi = const [
-    'Teknik Informatika',
-    'Sistem Informasi',
-    'Teknik Elektro',
-    'Manajemen',
-    'Akuntansi',
-  ];
+  List<UserModel> users = [];
+  String keyword = '';
+  String? deletingId;
 
   @override
-  void dispose() {
-    _namaController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _namaFocus.dispose();
-    _emailFocus.dispose();
-    _passwordFocus.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    futureUsers = loadUsers();
   }
 
-  // ---------- Validator ----------
-  String? _validateNama(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Nama tidak boleh kosong';
-    }
-    return null;
+  Future<List<UserModel>> loadUsers() async {
+    final result = await service.getUsers();
+    users = result;
+    return result;
   }
 
-  String? _validateEmail(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Email tidak boleh kosong';
-    }
-    if (!value.contains('@')) {
-      return 'Email harus mengandung "@"';
-    }
-    return null;
+  void refreshUsers() {
+    setState(() {
+      users = [];
+      futureUsers = loadUsers();
+    });
   }
 
-  String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Password tidak boleh kosong';
-    }
-    if (value.length < 6) {
-      return 'Password minimal 6 karakter';
-    }
-    return null;
+  void showMessage(String message, {bool error = false}) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: error
+            ? const Color(0xFFC15D5D)
+            : const Color(0xFF527967),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(20),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
   }
 
-  // ---------- Aksi tombol Daftar ----------
-  void _onDaftar() {
-    setState(() => _sudahSubmit = true);
+  // ======================================
+  // 5. PENGATURAN API KEY
+  // ======================================
 
-    final formValid = _formKey.currentState!.validate();
+  Future<void> settingApiKey() async {
+    final controller = TextEditingController(
+      text: service.apiKey,
+    );
 
-    // Checkbox belum dicentang -> tampilkan SnackBar peringatan
-    if (!_setuju) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('Anda harus menyetujui Syarat & Ketentuan terlebih dahulu!'),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      return;
-    }
-
-    // Validasi field teks + radio + dropdown
-    if (!formValid || _jenisKelamin == null || _programStudi == null) {
-      return;
-    }
-
-    _tampilkanDialogKonfirmasi();
-  }
-
-  void _tampilkanDialogKonfirmasi() {
-    showDialog(
+    final result = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Konfirmasi Data'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _baris('Nama', _namaController.text.trim()),
-              _baris('Email', _emailController.text.trim()),
-              _baris('Password', '•' * _passwordController.text.length),
-              _baris('Jenis Kelamin', _jenisKelamin!),
-              _baris('Program Studi', _programStudi!),
-              const SizedBox(height: 12),
-              const Text('Apakah data di atas sudah benar?'),
-            ],
+          title: const Text('Pengaturan API'),
+          content: SizedBox(
+            width: 370,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Masukkan API Key ReqRes untuk menghubungkan aplikasi.',
+                ),
+                const SizedBox(height: 18),
+                TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(
+                    labelText: 'API Key',
+                    prefixIcon: Icon(Icons.key_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Jangan gunakan manage key rahasia di browser.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
+                  ),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -149,187 +368,377 @@ class _RegistrationPageState extends State<RegistrationPage> {
               child: const Text('Batal'),
             ),
             FilledButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                _submit();
-              },
-              child: const Text('Submit'),
+              onPressed: () => Navigator.pop(
+                dialogContext,
+                controller.text.trim(),
+              ),
+              child: const Text('Simpan'),
             ),
           ],
         );
       },
     );
+
+    controller.dispose();
+
+    if (result == null || result.isEmpty) return;
+
+    if (result.startsWith('pro_')) {
+      showMessage(
+        'Manage key tidak aman digunakan di browser.',
+        error: true,
+      );
+      return;
+    }
+
+    service.apiKey = result;
+    refreshUsers();
   }
 
-  Widget _baris(String label, String nilai) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 110,
-            child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          const Text(': '),
-          Expanded(child: Text(nilai)),
-        ],
-      ),
+  // ======================================
+  // 6. FORM CREATE & UPDATE
+  // ======================================
+
+  Future<void> openForm({UserModel? user}) async {
+    final formKey = GlobalKey<FormState>();
+
+    String firstName = user?.firstName ?? '';
+    String lastName = user?.lastName ?? '';
+    String email = user?.email ?? '';
+
+    bool saving = false;
+    final isEdit = user != null;
+
+    final result = await showDialog<UserModel>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+              ),
+              title: Text(
+                isEdit ? 'Edit Pengguna' : 'Tambah Pengguna',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 21,
+                ),
+              ),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Form(
+                    key: formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Lengkapi informasi pengguna di bawah ini.',
+                          style: TextStyle(
+                            color: Colors.grey,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        TextFormField(
+                          initialValue: firstName,
+                          decoration: const InputDecoration(
+                            labelText: 'Nama Depan',
+                            prefixIcon:
+                            Icon(Icons.person_outline),
+                          ),
+                          onChanged: (value) => firstName = value,
+                          validator: (value) {
+                            if (value == null ||
+                                value.trim().isEmpty) {
+                              return 'Nama depan wajib diisi';
+                            }
+                            return null;
+                          },
+                        ),
+
+                        const SizedBox(height: 14),
+
+                        TextFormField(
+                          initialValue: lastName,
+                          decoration: const InputDecoration(
+                            labelText: 'Nama Belakang',
+                            prefixIcon:
+                            Icon(Icons.person_outline),
+                          ),
+                          onChanged: (value) => lastName = value,
+                          validator: (value) {
+                            if (value == null ||
+                                value.trim().isEmpty) {
+                              return 'Nama belakang wajib diisi';
+                            }
+                            return null;
+                          },
+                        ),
+
+                        const SizedBox(height: 14),
+
+                        TextFormField(
+                          initialValue: email,
+                          keyboardType: TextInputType.emailAddress,
+                          decoration: const InputDecoration(
+                            labelText: 'Alamat Email',
+                            prefixIcon:
+                            Icon(Icons.mail_outline),
+                          ),
+                          onChanged: (value) => email = value,
+                          validator: (value) {
+                            final text = value?.trim() ?? '';
+                            final valid = RegExp(
+                              r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                            ).hasMatch(text);
+
+                            if (!valid) {
+                              return 'Masukkan email yang valid';
+                            }
+
+                            return null;
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              actionsPadding: const EdgeInsets.fromLTRB(
+                20, 0, 20, 20,
+              ),
+              actions: [
+                TextButton(
+                  onPressed: saving
+                      ? null
+                      : () => Navigator.pop(dialogContext),
+                  child: const Text('Batal'),
+                ),
+                FilledButton.icon(
+                  onPressed: saving
+                      ? null
+                      : () async {
+                    if (!formKey.currentState!.validate()) {
+                      return;
+                    }
+
+                    setDialogState(() => saving = true);
+
+                    try {
+                      UserModel saved;
+
+                      if (isEdit) {
+                        saved = await service.updateUser(
+                          UserModel(
+                            id: user.id,
+                            firstName: firstName.trim(),
+                            lastName: lastName.trim(),
+                            email: email.trim(),
+                            avatar: user.avatar,
+                          ),
+                        );
+                      } else {
+                        saved = await service.createUser(
+                          firstName.trim(),
+                          lastName.trim(),
+                          email.trim(),
+                        );
+                      }
+
+                      if (!dialogContext.mounted) return;
+
+                      Navigator.pop(dialogContext, saved);
+                    } catch (e) {
+                      if (dialogContext.mounted) {
+                        setDialogState(() => saving = false);
+                      }
+
+                      showMessage('$e', error: true);
+                    }
+                  },
+                  icon: saving
+                      ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                    ),
+                  )
+                      : const Icon(Icons.check),
+                  label: Text(
+                    saving
+                        ? 'Menyimpan...'
+                        : isEdit
+                        ? 'Simpan Perubahan'
+                        : 'Tambah',
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
-  }
 
-  void _submit() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Registrasi berhasil!'),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-    _resetForm();
-  }
+    if (!mounted || result == null) return;
 
-  void _resetForm() {
-    _formKey.currentState!.reset();
-    _namaController.clear();
-    _emailController.clear();
-    _passwordController.clear();
     setState(() {
-      _jenisKelamin = null;
-      _programStudi = null;
-      _setuju = false;
-      _sudahSubmit = false;
+      if (isEdit) {
+        final index = users.indexWhere(
+              (item) => item.id == user.id,
+        );
+
+        if (index != -1) {
+          users[index] = result;
+        }
+      } else {
+        users.insert(0, result);
+      }
     });
+
+    showMessage(
+      isEdit
+          ? 'Data pengguna berhasil diperbarui!'
+          : 'Pengguna baru berhasil ditambahkan!',
+    );
   }
 
-  // ---------- UI ----------
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Form Registrasi')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  // ======================================
+  // 7. DELETE USER
+  // ======================================
+
+  Future<void> removeUser(UserModel user) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Hapus Pengguna?'),
+          content: Text(
+            'Apakah kamu yakin ingin menghapus '
+                '${user.fullName}?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, false),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC15D5D),
+              ),
+              onPressed: () =>
+                  Navigator.pop(dialogContext, true),
+              child: const Text('Hapus'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true || !mounted) return;
+
+    setState(() => deletingId = user.id);
+
+    try {
+      await service.deleteUser(user.id);
+
+      if (!mounted) return;
+
+      setState(() {
+        users.removeWhere((item) => item.id == user.id);
+      });
+
+      showMessage('Pengguna berhasil dihapus!');
+    } catch (e) {
+      showMessage('$e', error: true);
+    } finally {
+      if (mounted) {
+        setState(() => deletingId = null);
+      }
+    }
+  }
+
+  // ======================================
+  // 8. TAMPILAN KARTU PENGGUNA
+  // ======================================
+
+  Widget userCard(UserModel user) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: const BorderSide(
+          color: Color(0xFFE5EBE5),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          vertical: 10,
+          horizontal: 8,
+        ),
+        child: ListTile(
+          leading: CircleAvatar(
+            radius: 25,
+            backgroundColor: const Color(0xFFE3EFE6),
+            child: Text(
+              user.initials,
+              style: const TextStyle(
+                color: Color(0xFF527967),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          title: Text(
+            user.fullName,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 15,
+            ),
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: Text(
+              user.email,
+              style: const TextStyle(
+                color: Color(0xFF829086),
+                fontSize: 12,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          trailing: deletingId == user.id
+              ? const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+            ),
+          )
+              : Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // Nama Lengkap
-              TextFormField(
-                controller: _namaController,
-                focusNode: _namaFocus,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'Nama Lengkap',
-                  prefixIcon: Icon(Icons.person),
-                  border: OutlineInputBorder(),
+              IconButton(
+                tooltip: 'Edit',
+                icon: const Icon(
+                  Icons.edit_outlined,
+                  color: Color(0xFF527967),
                 ),
-                validator: _validateNama,
-                onFieldSubmitted: (_) =>
-                    FocusScope.of(context).requestFocus(_emailFocus),
+                onPressed: () => openForm(user: user),
               ),
-              const SizedBox(height: 16),
-
-              // Email
-              TextFormField(
-                controller: _emailController,
-                focusNode: _emailFocus,
-                keyboardType: TextInputType.emailAddress,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'Email',
-                  prefixIcon: Icon(Icons.email),
-                  border: OutlineInputBorder(),
+              IconButton(
+                tooltip: 'Hapus',
+                icon: const Icon(
+                  Icons.delete_outline,
+                  color: Color(0xFFC15D5D),
                 ),
-                validator: _validateEmail,
-                onFieldSubmitted: (_) =>
-                    FocusScope.of(context).requestFocus(_passwordFocus),
-              ),
-              const SizedBox(height: 16),
-
-              // Password
-              TextFormField(
-                controller: _passwordController,
-                focusNode: _passwordFocus,
-                obscureText: _obscurePassword,
-                textInputAction: TextInputAction.done,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: const Icon(Icons.lock),
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscurePassword
-                        ? Icons.visibility_off
-                        : Icons.visibility),
-                    onPressed: () =>
-                        setState(() => _obscurePassword = !_obscurePassword),
-                  ),
-                ),
-                validator: _validatePassword,
-                onFieldSubmitted: (_) => FocusScope.of(context).unfocus(),
-              ),
-              const SizedBox(height: 20),
-
-              // Jenis Kelamin (Radio)
-              const Text('Jenis Kelamin',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              Row(
-                children: [
-                  _radioOption('Laki-laki'),
-                  _radioOption('Perempuan'),
-                ],
-              ),
-              if (_sudahSubmit && _jenisKelamin == null)
-                _pesanError('Pilih jenis kelamin'),
-              const SizedBox(height: 12),
-
-              // Program Studi (DropdownButton)
-              const Text('Program Studi',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: (_sudahSubmit && _programStudi == null)
-                        ? Theme.of(context).colorScheme.error
-                        : Colors.grey,
-                  ),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: DropdownButton<String>(
-                  value: _programStudi,
-                  isExpanded: true,
-                  underline: const SizedBox(),
-                  hint: const Text('Pilih program studi'),
-                  items: _daftarProdi
-                      .map((p) => DropdownMenuItem(value: p, child: Text(p)))
-                      .toList(),
-                  onChanged: (value) => setState(() => _programStudi = value),
-                ),
-              ),
-              if (_sudahSubmit && _programStudi == null)
-                _pesanError('Pilih program studi'),
-              const SizedBox(height: 12),
-
-              // Checkbox Syarat & Ketentuan
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: const Text('Saya setuju dengan Syarat & Ketentuan'),
-                value: _setuju,
-                onChanged: (value) => setState(() => _setuju = value ?? false),
-              ),
-              const SizedBox(height: 16),
-
-              // Tombol Daftar
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: FilledButton(
-                  onPressed: _onDaftar,
-                  child: const Text('Daftar'),
-                ),
+                onPressed: () => removeUser(user),
               ),
             ],
           ),
@@ -338,26 +747,254 @@ class _RegistrationPageState extends State<RegistrationPage> {
     );
   }
 
-  Widget _radioOption(String value) {
-    return Expanded(
-      child: RadioListTile<String>(
-        contentPadding: EdgeInsets.zero,
-        title: Text(value),
-        value: value,
-        groupValue: _jenisKelamin,
-        onChanged: (v) => setState(() => _jenisKelamin = v),
-      ),
+  // ======================================
+  // 9. FUTUREBUILDER
+  // ======================================
+
+  Widget userList() {
+    return FutureBuilder<List<UserModel>>(
+      future: futureUsers,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState ==
+            ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.wifi_off_rounded,
+                  size: 55,
+                  color: Colors.grey,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Gagal memuat pengguna',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                  ),
+                  child: Text(
+                    '${snapshot.error}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.grey,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: refreshUsers,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Coba Lagi'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final filteredUsers = users.where((user) {
+          final search = keyword.toLowerCase();
+
+          return user.fullName
+              .toLowerCase()
+              .contains(search) ||
+              user.email.toLowerCase().contains(search);
+        }).toList();
+
+        if (filteredUsers.isEmpty) {
+          return const Center(
+            child: Text(
+              'Tidak ada pengguna ditemukan.',
+              style: TextStyle(color: Colors.grey),
+            ),
+          );
+        }
+
+        return ListView.builder(
+          itemCount: filteredUsers.length,
+          itemBuilder: (context, index) {
+            return userCard(filteredUsers[index]);
+          },
+        );
+      },
     );
   }
 
-  Widget _pesanError(String pesan) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4, left: 4),
-      child: Text(
-        pesan,
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.error,
-          fontSize: 12,
+  // ======================================
+  // 10. MAIN UI
+  // ======================================
+
+  @override
+  Widget build(BuildContext context) {
+    const primary = Color(0xFF527967);
+
+    return Scaffold(
+      appBar: AppBar(
+        toolbarHeight: 75,
+        title: const Row(
+          children: [
+            CircleAvatar(
+              backgroundColor: Color(0xFFE3EFE6),
+              child: Icon(
+                Icons.people_alt_outlined,
+                color: primary,
+              ),
+            ),
+            SizedBox(width: 12),
+            Text(
+              'Ruang Pengguna',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 19,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Pengaturan API Key',
+            onPressed: settingApiKey,
+            icon: const Icon(Icons.key_outlined),
+          ),
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: refreshUsers,
+            icon: const Icon(Icons.refresh),
+          ),
+          const SizedBox(width: 12),
+        ],
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            maxWidth: 850,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // HEADER
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE6F0E9),
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Kelola Pengguna',
+                        style: TextStyle(
+                          fontSize: 25,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF294D3B),
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Kelola informasi pengguna dengan '
+                            'mudah, cepat, dan sederhana.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF688073),
+                        ),
+                      ),
+                      SizedBox(height: 10),
+                      Text(
+                        'Mode demo ReqRes • Perubahan tidak '
+                            'tersimpan permanen.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF688073),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                // SEARCH + ADD
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        decoration: const InputDecoration(
+                          hintText: 'Cari pengguna...',
+                          hintStyle: TextStyle(fontSize: 13),
+                          prefixIcon: Icon(Icons.search),
+                        ),
+                        onChanged: (value) {
+                          setState(() => keyword = value);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 17,
+                          vertical: 18,
+                        ),
+                      ),
+                      onPressed: () => openForm(),
+                      icon: const Icon(
+                        Icons.add,
+                        size: 20,
+                      ),
+                      label: const Text('Tambah'),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 24),
+
+                const Text(
+                  'Daftar Pengguna',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF294D3B),
+                  ),
+                ),
+
+                const SizedBox(height: 6),
+
+                const Text(
+                  'Informasi pengguna yang tersedia.',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 12,
+                  ),
+                ),
+
+                const SizedBox(height: 18),
+
+                // DATA FROM API
+                Expanded(
+                  child: userList(),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
