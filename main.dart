@@ -1,277 +1,235 @@
-import 'dart:math';
-
-import 'package:avatar_glow/avatar_glow.dart';
-import 'package:convex_bottom_bar/convex_bottom_bar.dart';
-import 'package:dropdown_search/dropdown_search.dart';
-import 'package:faker/faker.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/date_symbol_data_local.dart';
-import 'package:intl/intl.dart';
 
-// ============================================================
-// ENTRY POINT
-// ============================================================
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  // Wajib agar DateFormat bisa memakai locale Indonesia
-  await initializeDateFormatting('id_ID', null);
-  runApp(const ContactApp());
+void main() {
+  runApp(const MyApp());
 }
 
-class ContactApp extends StatelessWidget {
-  const ContactApp({super.key});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Daftar Kontak',
       debugShowCheckedModeBanner: false,
+      title: 'Kartu Profil',
       theme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: const MainPage(),
+      home: const ProfileCardPage(),
     );
   }
 }
 
-// ============================================================
-// MODEL & DATA DUMMY (Faker)
-// ============================================================
-class Contact {
-  final String name;
-  final String phone;
-  final String email;
-  final String category;
-  final DateTime addedAt;
+class ProfileCardPage extends StatelessWidget {
+  const ProfileCardPage({super.key});
 
-  const Contact({
-    required this.name,
-    required this.phone,
-    required this.email,
-    required this.category,
-    required this.addedAt,
-  });
-}
-
-class ContactRepository {
-  static const List<String> categories = ['Keluarga', 'Teman', 'Kerja'];
-
-  /// Dibuat sekali saja, dipakai oleh halaman Kontak dan Cari.
-  static final List<Contact> contacts = _generate(20);
-
-  static List<Contact> _generate(int count) {
-    final faker = Faker();
-    final random = Random();
-
-    return List.generate(count, (i) {
-      return Contact(
-        name: faker.person.name(),
-        phone: '08${random.nextInt(900000000) + 100000000}',
-        email: faker.internet.email(),
-        category: categories[random.nextInt(categories.length)],
-        addedAt: DateTime.now().subtract(Duration(days: random.nextInt(365))),
-      );
-    });
-  }
-}
-
-// ============================================================
-// HALAMAN UTAMA + CONVEX APP BAR
-// ============================================================
-class MainPage extends StatefulWidget {
-  const MainPage({super.key});
-
-  @override
-  State<MainPage> createState() => _MainPageState();
-}
-
-class _MainPageState extends State<MainPage> {
-  int _currentIndex = 0;
-
-  final List<Widget> _pages = const [
-    ContactPage(),
-    SearchPage(),
-    ProfilePage(),
+  // Data profil (ganti sesuai datamu)
+  static const String nama = 'M. Mauludiy Efendi';
+  static const String prodi = 'Mahasiswa Sistem Informasi';
+  static const String deskripsi =
+      'Mahasiswa Sistem Informasi yang sedang belajar pengembangan '
+      'aplikasi mobile dengan Flutter dan Dart.';
+  static const List<String> skills = [
+    'Dart',
+    'Flutter',
+    'UI Design',
+    'Git',
+    'SQL',
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: _pages),
-      bottomNavigationBar: ConvexAppBar(
-        style: TabStyle.reactCircle,
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        initialActiveIndex: _currentIndex,
-        items: const [
-          TabItem(icon: Icons.contacts, title: 'Kontak'),
-          TabItem(icon: Icons.search, title: 'Cari'),
-          TabItem(icon: Icons.person, title: 'Profil'),
-        ],
-        onTap: (index) => setState(() => _currentIndex = index),
-      ),
-    );
-  }
-}
+      backgroundColor: Colors.grey.shade200,
+      appBar: AppBar(title: const Text('Kartu Profil')),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          // Lebar > 600 -> berdampingan (Row), selain itu bertumpuk (Column)
+          final bool isWide = constraints.maxWidth > 600;
 
-// ============================================================
-// WIDGET ITEM KONTAK (dipakai di 2 halaman)
-// ============================================================
-class ContactTile extends StatelessWidget {
-  final Contact contact;
-
-  const ContactTile({super.key, required this.contact});
-
-  @override
-  Widget build(BuildContext context) {
-    // Contoh hasil: "05 September 2026"
-    final tanggal =
-    DateFormat('dd MMMM yyyy', 'id_ID').format(contact.addedAt);
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      child: ListTile(
-        leading: CircleAvatar(
-          child: Text(contact.name[0].toUpperCase()),
-        ),
-        title: Text(
-          contact.name,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Text(
-          '${contact.phone}\n${contact.email}\nDitambahkan pada $tanggal',
-        ),
-        isThreeLine: true,
-        trailing: Chip(
-          label: Text(contact.category, style: const TextStyle(fontSize: 11)),
-          visualDensity: VisualDensity.compact,
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================
-// HALAMAN 1: KONTAK (ListView.builder)
-// ============================================================
-class ContactPage extends StatelessWidget {
-  const ContactPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final contacts = ContactRepository.contacts;
-
-    return Scaffold(
-      appBar: AppBar(title: Text('Kontak (${contacts.length})')),
-      body: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: contacts.length,
-        itemBuilder: (context, index) => ContactTile(contact: contacts[index]),
-      ),
-    );
-  }
-}
-
-// ============================================================
-// HALAMAN 2: CARI (DropdownSearch offline)
-// ============================================================
-class SearchPage extends StatefulWidget {
-  const SearchPage({super.key});
-
-  @override
-  State<SearchPage> createState() => _SearchPageState();
-}
-
-class _SearchPageState extends State<SearchPage> {
-  String? _selectedCategory;
-
-  @override
-  Widget build(BuildContext context) {
-    final filtered = _selectedCategory == null
-        ? <Contact>[]
-        : ContactRepository.contacts
-        .where((c) => c.category == _selectedCategory)
-        .toList();
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Cari Kontak')),
-      body: Column(
-        children: [
-          Padding(
+          return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
-            child: DropdownSearch<String>(
-              items: ContactRepository.categories,
-              selectedItem: _selectedCategory,
-              popupProps: const PopupProps.menu(
-                showSearchBox: true,
-                searchFieldProps: TextFieldProps(
-                  decoration: InputDecoration(
-                    hintText: 'Cari kategori...',
-                    prefixIcon: Icon(Icons.search),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 800),
+                child: Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 12,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
                   ),
+                  child: isWide ? const _WideLayout() : const _NarrowLayout(),
                 ),
               ),
-              dropdownDecoratorProps: const DropDownDecoratorProps(
-                dropdownSearchDecoration: InputDecoration(
-                  labelText: 'Kategori Kontak',
-                  hintText: 'Pilih kategori',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              onChanged: (value) => setState(() => _selectedCategory = value),
             ),
-          ),
-          Expanded(
-            child: _selectedCategory == null
-                ? const Center(child: Text('Pilih kategori untuk melihat kontak'))
-                : filtered.isEmpty
-                ? const Center(child: Text('Tidak ada kontak di kategori ini'))
-                : ListView.builder(
-              itemCount: filtered.length,
-              itemBuilder: (context, index) =>
-                  ContactTile(contact: filtered[index]),
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 }
 
-// ============================================================
-// HALAMAN 3: PROFIL (AvatarGlow)
-// ============================================================
-class ProfilePage extends StatelessWidget {
-  const ProfilePage({super.key});
+// Layout lebar: foto di kiri, info di kanan
+class _WideLayout extends StatelessWidget {
+  const _WideLayout();
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Profil')),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AvatarGlow(
-              glowColor: Theme.of(context).colorScheme.primary,
-              child: const CircleAvatar(
-                radius: 60,
-                backgroundColor: Colors.indigo,
-                // Ganti dengan foto sendiri: AssetImage('assets/foto.jpg')
-                backgroundImage: NetworkImage('https://i.pravatar.cc/300'),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        _ProfilePhoto(),
+        SizedBox(width: 32),
+        Expanded(child: _ProfileInfo(centered: false)),
+      ],
+    );
+  }
+}
+
+// Layout sempit: foto di atas, info di bawah
+class _NarrowLayout extends StatelessWidget {
+  const _NarrowLayout();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: const [
+        _ProfilePhoto(),
+        SizedBox(height: 24),
+        _ProfileInfo(centered: true),
+      ],
+    );
+  }
+}
+
+// Foto profil + badge "Available" memakai Stack & Positioned
+class _ProfilePhoto extends StatelessWidget {
+  const _ProfilePhoto();
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        // Ganti child dengan backgroundImage: AssetImage('assets/foto.jpg')
+        // setelah menambahkan foto di folder assets dan pubspec.yaml
+        CircleAvatar(
+          radius: 64,
+          backgroundColor: Colors.indigo.shade100,
+          child: const Icon(Icons.person, size: 72, color: Colors.indigo),
+        ),
+        Positioned(
+          bottom: 0,
+          right: -16,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.green,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white, width: 2),
+            ),
+            child: const Text(
+              'Available',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 24),
-            const Text(
-              'Nama Mahasiswa',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            const Text('Sistem Informasi'),
-            const Text('mahasiswa@email.com'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// Nama, prodi, deskripsi, skill (Wrap + Chip), dan ikon kontak (Row)
+class _ProfileInfo extends StatelessWidget {
+  final bool centered;
+
+  const _ProfileInfo({required this.centered});
+
+  @override
+  Widget build(BuildContext context) {
+    final align = centered ? TextAlign.center : TextAlign.start;
+
+    return Column(
+      crossAxisAlignment:
+      centered ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+      children: [
+        Text(
+          ProfileCardPage.nama,
+          textAlign: align,
+          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          ProfileCardPage.prodi,
+          textAlign: align,
+          style: TextStyle(fontSize: 16, color: Colors.grey.shade700),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          ProfileCardPage.deskripsi,
+          textAlign: align,
+          style: const TextStyle(fontSize: 14, height: 1.5),
+        ),
+        const SizedBox(height: 16),
+        // Wrap supaya chip otomatis pindah baris
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          alignment: centered ? WrapAlignment.center : WrapAlignment.start,
+          children: [
+            for (final skill in ProfileCardPage.skills)
+              Chip(
+                label: Text(skill),
+                avatar: const Icon(Icons.code, size: 16),
+              ),
           ],
         ),
-      ),
+        const SizedBox(height: 16),
+        // Row berisi 3 ikon kontak
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            _ContactIcon(icon: Icons.email, label: 'Email'),
+            SizedBox(width: 16),
+            _ContactIcon(icon: Icons.phone, label: 'Telepon'),
+            SizedBox(width: 16),
+            _ContactIcon(icon: Icons.code, label: 'GitHub'),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ContactIcon extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _ContactIcon({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        CircleAvatar(
+          backgroundColor: Colors.indigo,
+          child: Icon(icon, color: Colors.white),
+        ),
+        const SizedBox(height: 4),
+        Text(label, style: const TextStyle(fontSize: 12)),
+      ],
     );
   }
 }
